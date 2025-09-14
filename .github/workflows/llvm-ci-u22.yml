@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       llvm_tag:
-        description: "Tag (e.g. llvmorg-21.1.1) or ref for llvm/llvm-project"
+        description: "Tag (e.g. llvmorg-21.1.1 or llvmorg-15.0.7) for llvm/llvm-project. See https://github.com/llvm/llvm-project/tags"
         required: false
-        default: llvmorg-21.1.1
+        default: llvmorg-15.0.7
   pull_request:
     branches: [ main ]
     paths:
@@ -31,7 +31,7 @@ jobs:
 
     env:
       # manual input → repo/org var → default
-      LLVM_TAG: ${{ github.event.inputs.llvm_tag || vars.LLVM_TAG || 'llvmorg-21.1.1' }}
+      LLVM_TAG: ${{ github.event.inputs.llvm_tag || vars.LLVM_TAG || 'llvmorg-15.0.7' }}
 
     defaults:
       run:
