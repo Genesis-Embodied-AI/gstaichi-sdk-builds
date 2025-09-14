@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Vulkan SDK version (e.g., 1.4.304.1)'
+        description: 'Vulkan SDK version (e.g., 1.4.321.1)'
         required: false
-        default: '1.4.304.1'
+        default: '1.4.321.1'
 
 jobs:
   build-linux-arm:
@@ -63,7 +63,7 @@ jobs:
 
       - name: Extract SDK and Determine SDK Directory
         run: |
-          tar -xJf vulkan-sdk.tar.xz
+          tar -xf vulkan-sdk.tar.xz
           SDK_DIR=$(find . -maxdepth 1 -type d -name '1.*' | head -n 1)
           echo "SDK_DIR=${SDK_DIR}" >> $GITHUB_ENV
           echo "SDK_VERSION=$(basename ${SDK_DIR})" >> $GITHUB_ENV
