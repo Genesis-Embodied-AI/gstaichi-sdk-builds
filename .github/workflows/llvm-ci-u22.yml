@@ -3,14 +3,14 @@ name: Build LLVM (matrix)
 on:
   workflow_dispatch:
     inputs:
-      llvm_pin:
-        description: "Commit SHA, tag (e.g. llvmorg-21.1.1), or ref for llvm/llvm-project"
+      llvm_tag:
+        description: "Tag (e.g. llvmorg-21.1.1) or ref for llvm/llvm-project"
         required: false
         default: llvmorg-21.1.1
-  # Disabling automatic for now.
-  #push:
-  #  branches: [ main ]
-  #pull_request:
+  pull_request:
+    branches: [ main ]
+   paths:
+     - '.github/workflows/llvm-ci-u22.yml'
 
 permissions:
   contents: read
@@ -21,17 +21,13 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: build-u22
+    runs-on: ubunt-22.04
     timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, windows-2025]
 
     env:
       # manual input → repo/org var → default
-      LLVM_PIN: ${{ github.event.inputs.llvm_pin || vars.LLVM_PIN || 'llvmorg-21.1.1' }}
+      LLVM_TAG: ${{ github.event.inputs.llvm_tag || vars.LLVM_TAG || 'llvmorg-21.1.1' }}
 
     defaults:
       run:
@@ -44,7 +40,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       # --- calm the git default-branch hint ---
       - name: Silence git default-branch hint
@@ -57,21 +53,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git cmake ninja-build build-essential zip
           python -m pip install --upgrade pip
-
-      - name: Install prerequisites (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew update
-          brew install cmake ninja || true
-          python3 -m pip install --upgrade pip
-
-      - name: Install prerequisites (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ninja cmake
-          git config --global core.autocrlf false
 
       # ---------- Compute install prefix ----------
       - name: Compute install prefix
@@ -86,18 +67,17 @@ jobs:
 
       # ---------- Build *nix ----------
       - name: Build (Linux & macOS)
-        if: runner.os != 'Windows'
         env:
           CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
         run: |
           set -euo pipefail
-          echo "Using LLVM_PIN=${LLVM_PIN}"
+          echo "Using LLVM_TAG=${LLVM_TAG}"
 
           mkdir -p llvm-project
           cd llvm-project
           git init
           git remote add origin https://github.com/llvm/llvm-project.git
-          git fetch --depth 1 origin "${LLVM_PIN}"
+          git fetch --depth 1 origin "${LLVM_TAG}"
           git checkout --detach FETCH_HEAD
 
           python3 -m pip install -r mlir/python/requirements.txt
@@ -114,40 +94,6 @@ jobs:
             -DLLVM_ENABLE_TERMINFO=OFF
 
           cmake --build build --target all -- -k 0
-          cmake --build build --target check-mlir
-          cmake --build build --target install
-
-      # ---------- Build Windows ----------
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Write-Host "Using LLVM_PIN=$env:LLVM_PIN"
-
-          New-Item -ItemType Directory -Force -Path llvm-project | Out-Null
-          Set-Location llvm-project
-          git init
-          git remote add origin https://github.com/llvm/llvm-project.git
-          git fetch --depth 1 origin "$env:LLVM_PIN"
-          git checkout --detach FETCH_HEAD
-
-          python -m pip install -r mlir/python/requirements.txt
-
-          cmake -S llvm -B build -G "Ninja" `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_INSTALL_PREFIX="$env:CMAKE_INSTALL_PREFIX" `
-            -DLLVM_ENABLE_ASSERTIONS=ON `
-            -DLLVM_BUILD_UTILS=ON -DLLVM_BUILD_TOOLS=ON `
-            -DLLVM_INSTALL_UTILS=ON `
-            -DLLVM_ENABLE_PROJECTS="clang;lld;mlir" `
-            -DMLIR_ENABLE_BINDINGS_PYTHON=ON `
-            -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" `
-            -DLLVM_ENABLE_TERMINFO=OFF
-
-          cmake --build build --target all
           cmake --build build --target check-mlir
           cmake --build build --target install
 
@@ -171,7 +117,6 @@ jobs:
 
       # ----------  package (Linux/macOS) ----------
       - name: Package (Linux/macOS)
-        if: runner.os != 'Windows'
         env:
           CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
         run: |
@@ -193,19 +138,6 @@ jobs:
           # sha256
           ( cd "${GITHUB_WORKSPACE}" && shasum -a 256 "${{ steps.pkgmeta.outputs.zip }}" > "${{ steps.pkgmeta.outputs.zip }}.sha256" || sha256sum "${{ steps.pkgmeta.outputs.zip }}" > "${{ steps.pkgmeta.outputs.zip }}.sha256" )
 
-      # ----------  package (Windows) ----------
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
-        run: |
-          $zip = "${{ steps.pkgmeta.outputs.zip }}"
-          # Zip contents at root (strip=0 expectation)
-          Compress-Archive -Path "$env:CMAKE_INSTALL_PREFIX\*" -DestinationPath "$pwd\$zip" -Force
-          # SHA256
-          CertUtil -hashfile "$pwd\$zip" SHA256 | Out-File -FilePath "$pwd\$zip.sha256" -Encoding ascii
-
       # ---------- Upload artifacts (for aggregator) ----------
       - name: Upload packaged asset
         uses: actions/upload-artifact@v4
@@ -218,13 +150,13 @@ jobs:
 
   # ----------  publish a GitHub Release with all zips ----------
   release:
-    name: Publish release ${{ needs.build.outputs.LLVM_PIN }}
+    name: Publish release ${{ needs.build.outputs.LLVM_TAG }}
     runs-on: ubuntu-22.04
     needs: build
     permissions:
       contents: write
     env:
-      LLVM_PIN: ${{ github.event.inputs.llvm_pin || vars.LLVM_PIN || 'llvmorg-21.1.1' }}
+      LLVM_TAG: ${{ github.event.inputs.llvm_tag || vars.LLVM_TAG || 'llvmorg-21.1.1' }}
     steps:
       - name: Download all assets
         uses: actions/download-artifact@v4
@@ -234,14 +166,14 @@ jobs:
       - name: List assets
         run: ls -R dist
 
-      - name: Create/Update release (tag = LLVM_PIN)
+      - name: Create/Update release (tag = LLVM_TAG)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.LLVM_PIN }}
-          name: LLVM assets for ${{ env.LLVM_PIN }}
+          tag_name: llvm-ubuntu-${{ env.LLVM_TAG }}
+          name: LLVM assets for Ubuntu 22.04 on ${{ env.LLVM_TAG }}
           body: |
             Prebuilt LLVM/Clang/LLD/MLIR install trees for Taichi consumption.
-            Tag: ${{ env.LLVM_PIN }}
+            Tag: ${{ env.LLVM_TAG }}
           files: |
             dist/**/taichi-llvm-21-*.zip
             dist/**/taichi-llvm-21-*.zip.sha256
