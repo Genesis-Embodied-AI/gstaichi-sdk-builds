@@ -9,7 +9,7 @@ on:
         default: llvmorg-21.1.1
   pull_request:
     branches: [ main ]
-   paths:
+    paths:
      - '.github/workflows/llvm-ci-u22.yml'
 
 permissions:
@@ -147,33 +147,3 @@ jobs:
             ${{ github.workspace }}/${{ steps.pkgmeta.outputs.zip }}
             ${{ github.workspace }}/${{ steps.pkgmeta.outputs.zip }}.sha256
           if-no-files-found: error
-
-  # ----------  publish a GitHub Release with all zips ----------
-  release:
-    name: Publish release ${{ needs.build.outputs.LLVM_TAG }}
-    runs-on: ubuntu-22.04
-    needs: build
-    permissions:
-      contents: write
-    env:
-      LLVM_TAG: ${{ github.event.inputs.llvm_tag || vars.LLVM_TAG || 'llvmorg-21.1.1' }}
-    steps:
-      - name: Download all assets
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: List assets
-        run: ls -R dist
-
-      - name: Create/Update release (tag = LLVM_TAG)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: llvm-ubuntu-${{ env.LLVM_TAG }}
-          name: LLVM assets for Ubuntu 22.04 on ${{ env.LLVM_TAG }}
-          body: |
-            Prebuilt LLVM/Clang/LLD/MLIR install trees for Taichi consumption.
-            Tag: ${{ env.LLVM_TAG }}
-          files: |
-            dist/**/taichi-llvm-21-*.zip
-            dist/**/taichi-llvm-21-*.zip.sha256
