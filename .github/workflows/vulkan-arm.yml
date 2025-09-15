@@ -28,6 +28,7 @@ jobs:
         id: vars
         run: |
           VERSION=${{ github.event.inputs.version || env.DEFAULT_VULKAN_SDK_VERSION }}
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "SDK_URL=https://sdk.lunarg.com/sdk/download/${VERSION}/linux/vulkan-sdk.tar.xz" >> $GITHUB_ENV
           echo "Using specified SDK version: ${VERSION}"
 
@@ -76,13 +77,13 @@ jobs:
           elif [[ "${{ matrix.os }}" == "ubuntu-24.04-arm" ]]; then
             CC=/usr/bin/gcc-14 CXX=/usr/bin/g++-14  ./vulkansdk --maxjobs vulkan-loader vulkan-validationlayers vulkan-extensionlayer
           fi
+          tar -cJf ../vulkansdk-${{ matrix.os }}-${{ env.SDK_VERSION }}.tar.xz .
 
-      # When an Artifact is uploaded, all the files are assembled into an immutable Zip archive. There is currently no way to download artifacts in a format other than a Zip or to download individual artifact contents.
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vulkansdk-linux-arm64-${{ matrix.os }}-${{ env.SDK_VERSION }}
-          path: ${{ env.SDK_VERSION }}
+          name: vulkansdk-${{ matrix.os }}-${{ env.SDK_VERSION }}
+          path: vulkansdk-${{ matrix.os }}-${{ env.SDK_VERSION }}.tar.xz
 
   release:
     name: Publish release
