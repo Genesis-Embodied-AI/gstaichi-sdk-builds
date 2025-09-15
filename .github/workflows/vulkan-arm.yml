@@ -28,7 +28,7 @@ jobs:
         id: vars
         run: |
           VERSION=${{ github.event.inputs.version || env.DEFAULT_VULKAN_SDK_VERSION }}
-          echo "SDK_URL=https://sdk.lunarg.com/sdk/download/${VERSION}/linux/vulkansdk-linux-arm64-${VERSION}.tar.xz" >> $GITHUB_ENV
+          echo "SDK_URL=https://sdk.lunarg.com/sdk/download/${VERSION}/linux/vulkan-sdk.tar.xz >> $GITHUB_ENV
           echo "Using specified SDK version: ${VERSION}"
 
       - name: Update APT
