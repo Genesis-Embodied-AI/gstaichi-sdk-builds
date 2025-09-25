@@ -165,7 +165,7 @@ jobs:
           cp -R "${CMAKE_INSTALL_PREFIX}/." "$pkgroot/"
           # bundle license
           # The llvm-project directory is not available in this step, but the license was installed.
-          cp "${CMAKE_INSTALL_PREFIX}/LICENSE.TXT "$pkgroot/LLVM-LICENSE.txt" || true
+          cp "${CMAKE_INSTALL_PREFIX}/LICENSE.TXT" "$pkgroot/LLVM-LICENSE.txt" || true
           # optional strip to shrink size
           if [ -x "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" ]; then
             # Strip only ELF binaries and shared objects, not scripts
