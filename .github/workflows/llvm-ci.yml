@@ -164,10 +164,12 @@ jobs:
           # copy install tree
           cp -R "${CMAKE_INSTALL_PREFIX}/." "$pkgroot/"
           # bundle license
-          cp llvm-project/LICENSE.TXT "$pkgroot/LLVM-LICENSE.txt" || true
+          # The llvm-project directory is not available in this step, but the license was installed.
+          cp "${CMAKE_INSTALL_PREFIX}/LICENSE.TXT "$pkgroot/LLVM-LICENSE.txt" || true
           # optional strip to shrink size
           if [ -x "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" ]; then
-            find "$pkgroot/bin" -type f -exec "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded {} +
+            # Strip only ELF binaries and shared objects, not scripts
+            find "$pkgroot/bin" -type f -exec file {} + | grep -E 'ELF.*executable|ELF.*shared object' | cut -d: -f1 | xargs --no-run-if-empty "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded
             find "$pkgroot/lib" -type f \( -name "*.so*" -o -name "*.dylib" -o -name "*.a" \) \
               -exec "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded {} +
           fi
