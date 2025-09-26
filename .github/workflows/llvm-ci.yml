@@ -162,14 +162,17 @@ jobs:
           set -x
           pkgroot="${RUNNER_TEMP}/taichi-llvm-${LLVM_VERSION}-${{ steps.pkgmeta.outputs.suffix }}"
           mkdir -p "$pkgroot"
-          # copy install tree
           cp -R "${CMAKE_INSTALL_PREFIX}/." "$pkgroot/"
-          # optional strip to shrink size
-          if [ -x "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" ]; then
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
             # Strip only ELF binaries and shared objects, not scripts
             find "$pkgroot/bin" -type f -exec file {} + | grep -E 'ELF.*executable|ELF.*shared object' | cut -d: -f1 | xargs --no-run-if-empty "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded
-            find "$pkgroot/lib" -type f \( -name "*.so*" -o -name "*.dylib" -o -name "*.a" \) \
+            find "$pkgroot/lib" -type f \( -name "*.so*" -o -name "*.a" \) \
               -exec "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded {} +
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            # Strip Mach-O binaries (no --strip-unneeded flag for macOS)
+            find "$pkgroot/bin" -type f -exec file {} + | grep -E 'Mach-O.*executable' | cut -d: -f1 | xargs --no-run-if-empty "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip"
+            find "$pkgroot/lib" -type f \( -name "*.dylib" -o -name "*.a" \) \
+              -exec "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" {} +
           fi
           ( cd "${RUNNER_TEMP}" && zip -r "${GITHUB_WORKSPACE}/${{ steps.pkgmeta.outputs.zip }}" \
               "taichi-llvm-${LLVM_VERSION}-${{ steps.pkgmeta.outputs.suffix }}" )
