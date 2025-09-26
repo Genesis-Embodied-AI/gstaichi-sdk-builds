@@ -159,6 +159,7 @@ jobs:
         env:
           CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
         run: |
+          set -x
           pkgroot="${RUNNER_TEMP}/taichi-llvm-${LLVM_VERSION}-${{ steps.pkgmeta.outputs.suffix }}"
           mkdir -p "$pkgroot"
           # copy install tree
