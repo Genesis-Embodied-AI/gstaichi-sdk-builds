@@ -4,9 +4,12 @@ env:
   DEFAULT_VULKAN_SDK_VERSION: '1.4.321.1'
 
 on:
-  pull_request:
-    branches:
-      - main
+  # disable for now
+  # pull_request:
+  #   branches:
+  #     - main
+  #  paths:
+  #   - '.github/workflows/vulkan-arm.yml'
   workflow_dispatch:
     inputs:
       version:

@@ -1,0 +1,257 @@
+name: Build LLVM (matrix)
+
+env:
+  DEFAULT_LLVM_VERSION: '15.0.7'
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_version:
+        description: "e.g. 15.0.7, 21.1.1, etc"
+        required: false
+  pull_request:
+    branches:
+      - main
+    paths:
+     - '.github/workflows/llvm-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, windows-2025]
+    container: ${{ (matrix.os == 'ubuntu-22.04' && 'quay.io/pypa/manylinux_2_28_x86_64:latest') || (matrix.os == 'ubuntu-22.04-arm' && 'quay.io/pypa/manylinux_2_34_aarch64:latest') || '' }}  
+    defaults:
+      run:
+        shell: bash -eo pipefail {0}
+
+    steps:
+      - name: Set env vars
+        id: vars
+        run: |
+          LLVM_VERSION=${{ github.event.inputs.llvm_version || env.DEFAULT_LLVM_VERSION }}
+          echo "LLVM_VERSION=${LLVM_VERSION}" >> $GITHUB_ENV
+          echo "LLVM_TAG=llvmorg-${LLVM_VERSION}" >> $GITHUB_ENV
+
+      # --- calm the git default-branch hint ---
+      - name: Silence git default-branch hint
+        run: git config --global init.defaultBranch main
+
+      # ---------- Prereqs ----------
+      - name: Install prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          yum install -y zip
+          export PATH=/opt/python/cp310-cp310/bin:$PATH
+          pip install ninja
+          ln -s /opt/python/cp310-cp310/bin/ninja /usr/bin/ninja-build
+
+      - name: Install prerequisites (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ninja cmake
+          git config --global core.autocrlf false
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_BuildTools.exe" -OutFile "vs.exe"
+          .\vs.exe --passive --wait --norestart --includeRecommended --add Microsoft.VisualStudio.Workload.VCTools
+
+      # ---------- Compute install prefix ----------
+      - name: Compute install prefix
+        id: prefix
+        run: |
+          echo "prefix=${RUNNER_TEMP}/llvm-install" >> "$GITHUB_OUTPUT"
+
+      # ---------- Build *nix ----------
+      - name: Build (Linux & macOS)
+        if: runner.os != 'Windows'
+        env:
+          CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
+        run: |
+          echo "Using LLVM_TAG=${LLVM_TAG}"
+
+          mkdir -p llvm-project
+          cd llvm-project
+          git init
+          git remote add origin https://github.com/llvm/llvm-project.git
+          git fetch --depth 1 origin "${LLVM_TAG}"
+          git checkout --detach FETCH_HEAD
+
+          cmake -S llvm -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${CMAKE_INSTALL_PREFIX}" \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_ENABLE_RTTI:BOOL=ON \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+            -DLLVM_ENABLE_TERMINFO=OFF
+
+          cmake --build build --target all -- -k 0
+          cmake --build build --target install
+
+      # ---------- Build Windows ----------
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "Using LLVM_TAG=$env:LLVM_TAG"
+
+          $vsPath = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
+          cmd /c "`"$vsPath`" && set" | ForEach-Object {
+              if ($_ -match '^([^=]+)=(.*)') {
+                  [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+              }
+          }
+
+          New-Item -ItemType Directory -Force -Path llvm-project | Out-Null
+          Set-Location llvm-project
+          git init
+          git remote add origin https://github.com/llvm/llvm-project.git
+          git fetch --depth 1 origin "$env:LLVM_TAG"
+          git checkout --detach FETCH_HEAD
+
+          cmake -S llvm -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$env:CMAKE_INSTALL_PREFIX" `
+            -DLLVM_ENABLE_PROJECTS="clang;lld" `
+            -DLLVM_ENABLE_RTTI:BOOL=ON `
+            -DLLVM_ENABLE_LIBXML2=OFF `
+            -DLLVM_ENABLE_ZLIB=OFF `
+            -DLLVM_ENABLE_ZSTD=OFF `
+            -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" `
+            -DLLVM_ENABLE_TERMINFO=OFF `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreadedDLL"
+
+          cmake --build build --config Release --target ALL_BUILD
+          cmake --build build --config Release --target INSTALL
+
+      # ----------  compute package naming ----------
+      - name: Compute package name
+        id: pkgmeta
+        run: |
+          os="${RUNNER_OS}"
+          arch="$(uname -m || true)"
+          case "$os" in
+            Linux)
+              if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then suffix="linux-aarch64"; else suffix="linux-x86_64"; fi
+              ;;
+            macOS)  suffix="macos-arm64" ;; # macos-15 runners are Apple Silicon
+            Windows) suffix="windows-amd64" ;;
+          esac
+          echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
+          echo "zip=taichi-llvm-${LLVM_VERSION}-$suffix.zip" >> "$GITHUB_OUTPUT"
+
+      # ----------  package (Linux/macOS) ----------
+      - name: Package (Linux/macOS)
+        if: runner.os != 'Windows'
+        env:
+          CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
+        run: |
+          set -x
+          pkgroot="${RUNNER_TEMP}/taichi-llvm-${LLVM_VERSION}-${{ steps.pkgmeta.outputs.suffix }}"
+          mkdir -p "$pkgroot"
+          cp -R "${CMAKE_INSTALL_PREFIX}/." "$pkgroot/"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            # Strip only ELF binaries and shared objects, not scripts
+            find "$pkgroot/bin" -type f -exec file {} + | grep -E 'ELF.*executable|ELF.*shared object' | cut -d: -f1 | xargs --no-run-if-empty "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded
+            find "$pkgroot/lib" -type f \( -name "*.so*" -o -name "*.a" \) \
+              -exec "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded {} +
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            # Strip Mach-O binaries (no --strip-unneeded flag for macOS)
+            find "$pkgroot/bin" -type f -exec file {} + | grep -E 'Mach-O.*executable' | cut -d: -f1 | xargs --no-run-if-empty "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip"
+            find "$pkgroot/lib" -type f \( -name "*.dylib" -o -name "*.a" \) \
+              -exec "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" {} +
+          fi
+          ( cd "${RUNNER_TEMP}" && zip -r "${GITHUB_WORKSPACE}/${{ steps.pkgmeta.outputs.zip }}" \
+              "taichi-llvm-${LLVM_VERSION}-${{ steps.pkgmeta.outputs.suffix }}" )
+          # sha256
+          ( cd "${GITHUB_WORKSPACE}" && shasum -a 256 "${{ steps.pkgmeta.outputs.zip }}" > "${{ steps.pkgmeta.outputs.zip }}.sha256" || sha256sum "${{ steps.pkgmeta.outputs.zip }}" > "${{ steps.pkgmeta.outputs.zip }}.sha256" )
+
+      # ----------  package (Windows) ----------
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CMAKE_INSTALL_PREFIX: ${{ steps.prefix.outputs.prefix }}
+        run: |
+          $zip = "${{ steps.pkgmeta.outputs.zip }}"
+          # Zip contents at root (strip=0 expectation)
+          Compress-Archive -Path "$env:CMAKE_INSTALL_PREFIX\*" -DestinationPath "$pwd\$zip" -Force
+          # SHA256
+          CertUtil -hashfile "$pwd\$zip" SHA256 | Out-File -FilePath "$pwd\$zip.sha256" -Encoding ascii
+
+      # ---------- Upload artifacts (for aggregator) ----------
+      - name: Upload packaged asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkgmeta.outputs.zip }}
+          path: |
+            ${{ github.workspace }}/${{ steps.pkgmeta.outputs.zip }}
+            ${{ github.workspace }}/${{ steps.pkgmeta.outputs.zip }}.sha256
+          if-no-files-found: error
+
+  # ----------  publish a GitHub Release with all zips ----------
+  release:
+    name: Publish release
+    runs-on: ubuntu-22.04
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - name: Set env vars
+        id: vars
+        run: |
+          LLVM_VERSION=${{ github.event.inputs.llvm_version || env.DEFAULT_LLVM_VERSION }}
+          echo "LLVM_VERSION=${LLVM_VERSION}" >> $GITHUB_ENV
+          echo "LLVM_TAG=llvmorg-${LLVM_VERSION}" >> $GITHUB_ENV
+      - name: Download all assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: List assets
+        run: ls -R dist
+
+      - name: Set tag name
+        id: set_tag
+        run: |
+          # Get current date/time in UTC, format YYYYMMDDHHMM
+          DATE=$(date -u +'%Y%m%d%H%M')
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=llvm-${LLVM_VERSION}-${DATE}" >> $GITHUB_OUTPUT
+          else
+            PR_BRANCH="${{ github.head_ref }}"
+            PR_BRANCH_CLEAN=$(echo "$PR_BRANCH" | tr '/' '-' | tr -cd '[:alnum:]-')
+            echo "tag=llvm-${LLVM_VERSION}-${PR_BRANCH_CLEAN}-${DATE}" >> $GITHUB_OUTPUT
+          fi
+      - name: Set prerelease flag
+        id: set_prerelease
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create/Update release (tag = LLVM_TAG)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.set_tag.outputs.tag }}
+          name: ${{ steps.set_tag.outputs.tag }}
+          prerelease: ${{ steps.set_prerelease.outputs.is_prerelease }}
+          body: |
+            Prebuilt LLVM/Clang install trees for GsTaichi consumption.
+          files: |
+            dist/**
