@@ -168,12 +168,6 @@ jobs:
             find "$pkgroot/bin" -type f -exec file {} + | grep -E 'ELF.*executable|ELF.*shared object' | cut -d: -f1 | xargs --no-run-if-empty "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded
             find "$pkgroot/lib" -type f \( -name "*.so*" -o -name "*.a" \) \
               -exec "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" --strip-unneeded {} +
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            # dummy line to trigger initial build
-            # Strip Mach-O binaries (no --strip-unneeded flag for macOS)
-            find "$pkgroot/bin" -type f -exec file {} + | grep -E 'Mach-O.*executable' | cut -d: -f1 | xargs --no-run-if-empty "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip"
-            find "$pkgroot/lib" -type f \( -name "*.dylib" -o -name "*.a" \) \
-              -exec "${CMAKE_INSTALL_PREFIX}/bin/llvm-strip" {} +
           fi
           ( cd "${RUNNER_TEMP}" && zip -r "${GITHUB_WORKSPACE}/${{ steps.pkgmeta.outputs.zip }}" \
               "taichi-llvm-${LLVM_VERSION}-${{ steps.pkgmeta.outputs.suffix }}" )
