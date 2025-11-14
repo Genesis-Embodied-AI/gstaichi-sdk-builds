@@ -45,6 +45,7 @@ jobs:
         run: git config --global init.defaultBranch main
 
       - name: Free Disk Space
+        if: runner.os == 'Linux'
         run: |
           df -h
           pushd /opt/python
