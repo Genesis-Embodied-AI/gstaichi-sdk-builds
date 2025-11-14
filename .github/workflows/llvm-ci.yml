@@ -1,13 +1,13 @@
 name: Build LLVM (matrix)
 
 env:
-  DEFAULT_LLVM_VERSION: '15.0.7'
+  DEFAULT_LLVM_VERSION: '20.1.0'
 
 on:
   workflow_dispatch:
     inputs:
       llvm_version:
-        description: "e.g. 15.0.7, 21.1.1, etc"
+        description: "e.g. 15.0.7, 20.1.0, 21.1.1, etc"
         required: false
   pull_request:
     branches:
@@ -44,6 +44,19 @@ jobs:
       - name: Silence git default-branch hint
         run: git config --global init.defaultBranch main
 
+      - name: Free Disk Space
+        if: runner.os == 'Linux'
+        run: |
+          df -h
+          pushd /opt/python
+          rm -Rf cp39-cp39 cp314-cp314 cp314-cp314t cp38-cp38 cp313-cp313t pp310-pypy310_pp73 pp311-pypy311_pp73
+          for cpversion in cp310 cp311 cp312 cp313; do {
+            if [[ "${cpversion}" != "cp310" ]]; then
+              rm -Rf ${cpversion}-${cpversion}
+            fi
+          } done
+          ls /opt/python/
+          df -h
       # ---------- Prereqs ----------
       - name: Install prerequisites (Linux)
         if: runner.os == 'Linux'
