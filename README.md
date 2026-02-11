@@ -1,3 +1,3 @@
-# gstaichi-sdk-builds
+# quadrants-sdk-builds
 
-For building SDKs needed by gstaichi CI.
+For building SDKs needed by quadrants CI.
