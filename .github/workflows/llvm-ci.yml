@@ -84,6 +84,11 @@ jobs:
           git fetch --depth 1 origin "${LLVM_TAG}"
           git checkout --detach FETCH_HEAD
 
+          extra_cmake_args=""
+          if [ "$(uname)" = "Darwin" ]; then
+            extra_cmake_args="-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
+          fi
+
           cmake -S llvm -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="${CMAKE_INSTALL_PREFIX}" \
@@ -100,7 +105,8 @@ jobs:
             -DLLVM_INCLUDE_DOCS=OFF \
             -DCLANG_INCLUDE_TESTS=OFF \
             -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
-            -DCLANG_ENABLE_ARCMT=OFF
+            -DCLANG_ENABLE_ARCMT=OFF \
+            $extra_cmake_args
 
           cmake --build build --target all -- -k 0
           cmake --build build --target install
